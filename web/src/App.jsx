@@ -4,8 +4,11 @@ import DashboardPage from './pages/Dashboard.jsx';
 
 export default function App() {
   return (
-    <div>
-      <h2>Hello from homepage</h2>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<UploadPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
