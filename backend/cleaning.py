@@ -85,9 +85,16 @@ def normalize_latency(raw: str, unit: str) -> tuple[Optional[float], Optional[st
 
     return ms, None
 
+
 def clean_rows(csv_text: str) -> dict:
     """
     Parses raw CSV text and returns cleaned, validated rows ready for insertion.
+
+    For each row: normalizes the timestamp to UTC (handles epoch seconds, "Z", and
+    explicit offsets), normalizes latency to milliseconds, flags 5xx/999 as errors, and
+    drops duplicates based on the *normalized* timestamp (not the raw string, which
+    would miss same-instant duplicates written in different formats). Malformed rows
+    (missing fields, bad timestamp/status) are dropped.
 
     Returns:
         {"rows": [...], "issues": [...], "dropped_count": int, "raw_row_count": int}
@@ -109,6 +116,7 @@ def clean_rows(csv_text: str) -> dict:
 
     clean: list[dict] = []
     issues: list[dict] = []
+    seen_keys: set[str] = set()  # in-file de-dupe, mirrors the DB's unique index
     dropped_count = 0
 
     def get(cols: list[str], name: str) -> str:
@@ -157,6 +165,21 @@ def clean_rows(csv_text: str) -> dict:
         )
         if latency_issue:
             row_issues.append(latency_issue)
+
+        # De-dupe key uses the *normalized* UTC timestamp — two rows
+        # can have differently-formatted timestamps (e.g. "+05:30" vs "Z") that represent
+        # the exact same instant, which a raw-string comparison would miss entirely.
+        key = f"{service_id}|{agent}|{ts}|{status_code}|{latency_ms if latency_ms is not None else 'null'}"
+        if key in seen_keys:
+            issues.append(
+                {
+                    "line": line_no,
+                    "issues": ["exact duplicate of an earlier row — skipped"],
+                }
+            )
+            dropped_count += 1
+            continue
+        seen_keys.add(key)
 
         clean.append(
             {
