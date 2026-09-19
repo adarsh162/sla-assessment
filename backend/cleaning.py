@@ -20,6 +20,14 @@ REQUIRED_COLUMNS = [
 ]
 
 
+def is_error_status(code: int) -> bool:
+    """
+    A status code counts as a failed check if it's a real 5xx, OR the 999 sentinel this
+    dataset uses for a check that didn't get a real HTTP response at all (agent-side
+    timeout/error, not a server response).
+    """
+    return code >= 500 or code == 999
+
 
 def clean_rows(csv_text: str) -> dict:
     """
@@ -87,6 +95,7 @@ def clean_rows(csv_text: str) -> dict:
                 "status_code": status_code,
                 "agent": agent,
                 "region": region,
+                "is_error": is_error_status(status_code),
             }
         )
         if row_issues:
