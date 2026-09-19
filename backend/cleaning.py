@@ -57,6 +57,34 @@ def parse_timestamp(raw: str) -> Optional[str]:
     except ValueError:
         return None
 
+
+def normalize_latency(raw: str, unit: str) -> tuple[Optional[float], Optional[str]]:
+    """Returns (latency_ms_or_None, issue_message_or_None)."""
+    trimmed = raw.strip()
+    if trimmed == "":
+        return (
+            None,
+            None,
+        )  # missing is a known, expected gap — not an error to flag loudly
+
+    try:
+        num = float(trimmed)
+    except ValueError:
+        return None, f'unparseable latency "{raw}"'
+
+    u = unit.strip().lower()
+    if u == "ms":
+        ms = num
+    elif u == "s":
+        ms = num * 1000
+    else:
+        return None, f'unknown latency_unit "{unit}"'
+
+    if ms < 0:
+        return None, f"negative latency ({ms}ms) — discarded, kept the row"
+
+    return ms, None
+
 def clean_rows(csv_text: str) -> dict:
     """
     Parses raw CSV text and returns cleaned, validated rows ready for insertion.
@@ -124,12 +152,19 @@ def clean_rows(csv_text: str) -> dict:
             dropped_count += 1
             continue
 
+        latency_ms, latency_issue = normalize_latency(
+            get(cols, "latency"), get(cols, "latency_unit")
+        )
+        if latency_issue:
+            row_issues.append(latency_issue)
+
         clean.append(
             {
                 "service_id": service_id,
                 "service_name": service_name,
                 "ts": ts,
                 "status_code": status_code,
+                "latency_ms": latency_ms,
                 "agent": agent,
                 "region": region,
                 "is_error": is_error_status(status_code),
