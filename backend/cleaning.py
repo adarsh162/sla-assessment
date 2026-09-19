@@ -8,6 +8,9 @@ needing a live server, Supabase credentials, or any mocking.
 
 import csv
 import io
+from datetime import datetime, timezone
+from typing import Optional
+
 REQUIRED_COLUMNS = [
     "service_id",
     "service_name",
@@ -28,6 +31,31 @@ def is_error_status(code: int) -> bool:
     """
     return code >= 500 or code == 999
 
+
+def parse_timestamp(raw: str) -> Optional[str]:
+    """Returns an ISO 8601 UTC string, or None if unparseable."""
+    trimmed = raw.strip()
+    if not trimmed:
+        return None
+
+    # Case 1: pure unix epoch seconds, e.g. "1746938700" — no separators at all.
+    if trimmed.isdigit():
+        try:
+            dt = datetime.fromtimestamp(int(trimmed), tz=timezone.utc)
+            return dt.isoformat().replace("+00:00", "Z")
+        except (ValueError, OverflowError, OSError):
+            return None
+
+    # Case 2: ISO 8601, either "...Z" or with an explicit offset like "+05:30".
+    try:
+        normalized = trimmed.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_utc = dt.astimezone(timezone.utc)
+        return dt_utc.isoformat().replace("+00:00", "Z")
+    except ValueError:
+        return None
 
 def clean_rows(csv_text: str) -> dict:
     """
@@ -75,6 +103,14 @@ def clean_rows(csv_text: str) -> dict:
             dropped_count += 1
             continue
 
+        ts = parse_timestamp(get(cols, "timestamp"))
+        if not ts:
+            issues.append(
+                {"line": line_no, "issues": ["unparseable timestamp — row dropped"]}
+            )
+            dropped_count += 1
+            continue
+
         status_raw = get(cols, "status_code")
         try:
             status_code = int(status_raw)
@@ -92,6 +128,7 @@ def clean_rows(csv_text: str) -> dict:
             {
                 "service_id": service_id,
                 "service_name": service_name,
+                "ts": ts,
                 "status_code": status_code,
                 "agent": agent,
                 "region": region,
