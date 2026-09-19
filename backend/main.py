@@ -50,6 +50,19 @@ def _json_response(body: dict, status: int):
 
 
 @functions_framework.http
+def ingest(request: Request):
+    """
+    Entry point Cloud Functions actually calls. Wraps _handle_ingest in a catch-all so
+    an unexpected exception returns a clear JSON error instead of functions_framework's
+    generic HTML 500 page — that page hides the real cause and sends you hunting through
+    server logs for something a one-line message could have told you immediately.
+    """
+    try:
+        return _handle_ingest(request)
+    except Exception as err:
+        return _json_response({"error": f"Unhandled error: {err}"}, 500)
+
+
 def _handle_ingest(request: Request):
     """
     Single HTTP entry point for this Cloud Function. Handles CORS preflight, a GET
