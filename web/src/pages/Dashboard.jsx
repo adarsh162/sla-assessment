@@ -2,11 +2,16 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase.js';
 
 const SLA_TARGET = 99.9;
+const PAGE_SIZE = 50;
 
 export default function DashboardPage() {
   const [statsOpen, setStatsOpen] = useState(true);
   const [stats, setStats] = useState(null);
   const [statsError, setStatsError] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [page, setPage] = useState(0);
+  const [totalLogs, setTotalLogs] = useState(0);
+  const [logsLoading, setLogsLoading] = useState(false);
 
   const loadStats = useCallback(async () => {
     // Default window: everything. If dates are set, stats reflect that same window
@@ -24,7 +29,26 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    let query = supabase
+      .from('checks')
+      .select('id, service_id, ts, status_code, latency_ms, agent, region, is_error', { count: 'exact' })
+      .order('ts', { ascending: false })
+      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+
+    const { data, count, error } = await query;
+    if (!error) {
+      setLogs(data ?? []);
+      setTotalLogs(count ?? 0);
+    }
+    setLogsLoading(false);
+  }, [page]);
+
   useEffect(() => { loadStats(); }, [loadStats]);
+  useEffect(() => { loadLogs(); }, [loadLogs]);
+
+  const totalPages = Math.max(1, Math.ceil(totalLogs / PAGE_SIZE));
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-12">
@@ -64,6 +88,62 @@ export default function DashboardPage() {
             )}
           </div>
         )}
+      </section>
+
+      {/* Logs panel */}
+      <section className="border border-line bg-panel">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="text-xs text-muted">
+                <th className="px-5 py-2 font-normal">Timestamp (UTC)</th>
+                <th className="px-3 py-2 font-normal">Service</th>
+                <th className="px-3 py-2 font-normal">Status</th>
+                <th className="px-3 py-2 font-normal">Latency</th>
+                <th className="px-3 py-2 font-normal">Agent</th>
+                <th className="px-5 py-2 font-normal">Region</th>
+              </tr>
+            </thead>
+            <tbody className="font-mono text-xs">
+              {logsLoading && (
+                <tr><td colSpan={6} className="px-5 py-6 text-center text-muted">Loading…</td></tr>
+              )}
+              {!logsLoading && logs.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-6 text-center text-muted">No checks in this window.</td></tr>
+              )}
+              {!logsLoading && logs.map((row) => (
+                <tr key={row.id} className="border-t border-line">
+                  <td className="px-5 py-2 text-ink">{row.ts.replace('T', ' ').replace('.000Z', '')}</td>
+                  <td className="px-3 py-2 text-ink">{row.service_id}</td>
+                  <td className={`px-3 py-2 ${row.is_error ? 'text-bad' : 'text-ok'}`}>{row.status_code}</td>
+                  <td className="px-3 py-2 text-muted">
+                    {row.latency_ms === null ? '—' : `${Math.round(row.latency_ms)}ms`}
+                  </td>
+                  <td className="px-3 py-2 text-muted">{row.agent}</td>
+                  <td className="px-5 py-2 text-muted">{row.region}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-line px-5 py-3 text-xs text-muted">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="disabled:opacity-30"
+          >
+            ← Prev
+          </button>
+          <span>Page {page + 1} of {totalPages}</span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            disabled={page >= totalPages - 1}
+            className="disabled:opacity-30"
+          >
+            Next →
+          </button>
+        </div>
       </section>
     </main>
   );
