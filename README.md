@@ -204,3 +204,11 @@ pushing to the connected branch redeploys the web app automatically on Vercel/Ne
 - **Alerting on the ingest response**, e.g. a Slack webhook when a batch's error rate or
   dropped-row count crosses a threshold, so a bad upload doesn't just sit unnoticed until
   someone happens to open the dashboard.
+- **Rate limiting / basic abuse protection on the ingest endpoint.** It's deployed with
+  `--allow-unauthenticated` (required, since the browser calls it directly with no backend
+  of its own in front), which means anyone with the URL can currently POST arbitrary data
+  to it with no limit. For this assignment's scope that's an acceptable tradeoff, but a
+  production version would want either a lightweight shared-secret header the frontend
+  attaches, or Cloud Armor / a per-IP rate limit in front of the function, so a bad actor
+  (or just a buggy retry loop) can't spam writes into the database or run up invocation
+  costs.
