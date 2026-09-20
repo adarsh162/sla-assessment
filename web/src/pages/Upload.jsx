@@ -42,13 +42,21 @@ export default function UploadPage() {
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-16">
-      <div className="mb-10">
-        <p className="text-sm text-muted">SLA Monitoring</p>
-        <h1 className="mt-1 text-2xl text-ink">Upload health-check log</h1>
-        <p className="mt-2 max-w-md text-sm text-muted">
-          A CSV of 15-minute health checks across services. It gets parsed and
-          validated in a cloud function, then stored for the dashboard.
-        </p>
+      <div className="mb-10 flex items-start justify-between">
+        <div>
+          <p className="text-sm text-muted">SLA Monitoring</p>
+          <h1 className="mt-1 text-2xl text-ink">Upload health-check log</h1>
+          <p className="mt-2 max-w-md text-sm text-muted">
+            A CSV of 15-minute health checks across services. It gets parsed and
+            validated in a cloud function, then stored for the dashboard.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="shrink-0 border border-line px-3 py-1.5 text-xs text-muted hover:text-ink hover:bg-line/40"
+        >
+          View dashboard →
+        </button>
       </div>
 
       <div

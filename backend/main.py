@@ -19,6 +19,7 @@ Deploy:         see README "Deployment" section (gcloud functions deploy, 2nd ge
 """
 
 import json
+import logging
 import uuid
 
 import functions_framework
@@ -27,12 +28,8 @@ from flask import Request
 from cleaning import clean_rows
 from db import insert_batch
 
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("sla-ingest")
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
@@ -60,6 +57,7 @@ def ingest(request: Request):
     try:
         return _handle_ingest(request)
     except Exception as err:
+        logger.exception("Unhandled error in ingest")
         return _json_response({"error": f"Unhandled error: {err}"}, 500)
 
 
@@ -81,14 +79,19 @@ def _handle_ingest(request: Request):
 
     csv_text = request.get_data(as_text=True)
     if not csv_text or not csv_text.strip():
+        logger.warning("Received empty upload")
         return _json_response({"error": "Empty upload."}, 400)
+
+    logger.info("Received upload: %d bytes", len(csv_text))
 
     try:
         result = clean_rows(csv_text)
     except ValueError as err:
+        logger.warning("Parse failed: %s", err)
         return _json_response({"error": f"Parse failed: {err}"}, 400)
 
     if not result["rows"]:
+        logger.warning("No valid rows after cleaning (%d raw rows)", result["raw_row_count"])
         return _json_response(
             {"error": "No valid rows after cleaning.", "issues": result["issues"]}, 422
         )
@@ -97,10 +100,20 @@ def _handle_ingest(request: Request):
     for row in result["rows"]:
         row["upload_batch"] = batch_id
 
+    logger.info(
+        "Cleaned batch %s: %d raw -> %d inserted, %d dropped, %d issues",
+        batch_id, result["raw_row_count"], len(result["rows"]),
+        result["dropped_count"], len(result["issues"]),
+    )
+
     try:
         insert_batch(result["rows"])
     except RuntimeError as err:
+        logger.error("Insert failed for batch %s: %s", batch_id, err)
         return _json_response({"error": str(err)}, 502)
+
+    logger.info("Batch %s inserted successfully", batch_id)
+
     return _json_response(
         {
             "upload_batch": batch_id,
