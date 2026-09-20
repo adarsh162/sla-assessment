@@ -33,10 +33,12 @@ def insert_batch(rows: list[dict]) -> None:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError(
             "SUPABASE_URL and/or SUPABASE_SERVICE_ROLE_KEY is not set in this process's "
-            "environment — set both and restart the server/function."
+            "environment — set both (or add a backend/.env file) and restart the "
+            "server/function."
         )
 
     url = f"{SUPABASE_URL}/rest/v1/checks"
+    params = {"on_conflict": "service_id,agent,ts,status_code,latency_ms_key"}
     headers = {
         "Content-Type": "application/json",
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -46,9 +48,9 @@ def insert_batch(rows: list[dict]) -> None:
 
     with httpx.Client(timeout=30.0) as client:
         for i in range(0, len(rows), INSERT_CHUNK_SIZE):
-            chunk = rows[i : i + INSERT_CHUNK_SIZE]
+            chunk = rows[i:i + INSERT_CHUNK_SIZE]
             try:
-                res = client.post(url, headers=headers, json=chunk)
+                res = client.post(url, params=params, headers=headers, json=chunk)
             except httpx.HTTPError as err:
                 raise RuntimeError(f"Could not reach Supabase at {url}: {err}") from err
             if res.status_code >= 300:

@@ -12,7 +12,8 @@ create table if not exists checks (
   region        text not null,
   is_error      boolean not null,     -- derived: status_code >= 500, OR the 999 sentinel
   upload_batch  text not null,        -- groups rows from the same upload, for traceability
-  inserted_at   timestamptz not null default now()
+  inserted_at   timestamptz not null default now(),
+  latency_ms_key numeric generated always as (coalesce(latency_ms, -1)) stored
 );
 
 -- The dashboard's two main query patterns: per-service aggregates over a window,
@@ -26,7 +27,7 @@ create index if not exists idx_checks_batch on checks (upload_batch);
 -- same file. Two agents legitimately checking the same service at the same timestamp is
 -- NOT a duplicate — hence agent is part of the key, not just service+ts.
 create unique index if not exists uniq_checks_reading
-  on checks (service_id, agent, ts, status_code, coalesce(latency_ms, -1));
+  on checks (service_id, agent, ts, status_code, latency_ms_key);
 
 -- Powers the dashboard's stats panel. Computed in the database rather than pulled
 -- row-by-row to the browser, since a service with weeks of 15-minute checks could be
@@ -73,4 +74,3 @@ alter table checks enable row level security;
 create policy "public read access" on checks
   for select
   using (true);
-
