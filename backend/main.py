@@ -20,6 +20,7 @@ Deploy:         see README "Deployment" section (gcloud functions deploy, 2nd ge
 
 import json
 import logging
+import sys
 import uuid
 
 import functions_framework
@@ -28,8 +29,14 @@ from flask import Request
 from cleaning import clean_rows
 from db import insert_batch
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sla-ingest")
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setLevel(logging.INFO)
+    _handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+    logger.addHandler(_handler)
+logger.propagate = False  # don't also send it up to root, which could double-log it
 
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
