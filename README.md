@@ -42,6 +42,34 @@
   `SELECT`) without needing a second backend just to serve reads. The Cloud Function writes
   with the service-role key (via Supabase's REST API over `httpx`), which bypasses RLS —
   that key lives only in the function's environment and never reaches the browser.
+- **Cross-upload duplicates are ignored at the database level, not just within one file.**
+  `cleaning.py`'s in-memory `seen_keys` set only catches duplicates *inside* a single
+  upload — it has no memory of anything from a previous request, because the function is
+  genuinely stateless (a fresh process, fresh empty set, every invocation). Re-uploading a
+  file that overlaps with data already in the table is a real scenario (tested directly,
+  not just theorized), so the database itself is the second, persistent layer that has to
+  catch it. The insert uses `Prefer: resolution=ignore-duplicates` together with an
+  `on_conflict=service_id,agent,ts,status_code,latency_ms_key` query parameter — together
+  these make PostgREST build an `INSERT ... ON CONFLICT (...) DO NOTHING`, so a row that
+  already exists (matching the same unique index used for in-file de-duping) is silently
+  skipped rather than raising a hard `23505` unique-violation error. Both parts are
+  required together: the `Prefer` header alone does nothing without `on_conflict` telling
+  PostgREST which constraint to check.
+- **Why there's a `latency_ms_key` generated column, not just an index on
+  `coalesce(latency_ms, -1)` directly.** The original design applied `coalesce` straight
+  inside the unique index definition, so that two rows with the same missing (`NULL`)
+  latency would still count as duplicates of each other — by default SQL treats `NULL` as
+  never equal to another `NULL`, even in a unique index, so without this a pair of
+  identical rows that both happened to have no latency reading could slip through
+  undetected. That worked fine for de-duping on insert alone, but broke the upsert path
+  above: Postgres's `ON CONFLICT (columns...)` — which is what `on_conflict` generates —
+  can only target a plain list of real columns, not an arbitrary expression computed
+  inline in an index. The fix was a generated, stored column,
+  `latency_ms_key numeric generated always as (coalesce(latency_ms, -1)) stored`, that
+  Postgres fills in automatically on every insert (it's never provided directly in the
+  insert payload), with the unique index built on that real column instead of the raw
+  expression — preserving the original null-handling behavior while making the index
+  something `on_conflict` can actually reference.
 - **Stats aggregation runs in the database, not the browser.** `service_stats()` is a SQL
   function using `percentile_cont` for p95 latency. Pulling every row to the client to compute
   that in JavaScript would work at this dataset's size, but would fall over as soon as a
@@ -110,6 +138,14 @@ the health check itself is invalid — the row is kept, only the untrustworthy n
 - **"End of day" for the "To" date filter:** inclusive through 23:59:59 of the selected day
   (implemented as `< next day 00:00:00`), since a person picking a single end date almost
   certainly means "through the end of that day," not "up to midnight at its start."
+- **`inserted_count` in the API response counts rows sent to Supabase, not rows newly
+  written.** Because duplicate rows are silently skipped at the database level (see
+  architecture section above) using `return=minimal` to keep responses small, the
+  response can't currently distinguish "genuinely new" from "already existed, skipped by
+  `ON CONFLICT`." Re-uploading the same file twice will report the same `inserted_count`
+  both times, even though the second upload writes zero new rows in practice. Switching to
+  `return=representation` would let the response report this accurately, at the cost of a
+  larger response payload — not done here since it wasn't needed for this dataset's size.
 - **Not built, on purpose:** authentication/user accounts, multi-tenant support, and CI
   pipelines — all explicitly out of scope per the assignment brief.
 
